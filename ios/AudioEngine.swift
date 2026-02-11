@@ -207,6 +207,10 @@ class AudioEngine {
         }
     }
 
+    func stopPlayer() {
+        speechPlayer.stop()
+        updateOutputVolume()
+    }
     
     private func createBuffer(from data: Data) -> AVAudioPCMBuffer? {
         let frameCount = UInt32(data.count) / 2 // 16-bit input = 2 bytes per frame
