@@ -11,6 +11,10 @@
 # `@equationalapplications/*` releases are exempt from the gate.
 version: 2
 updates:
+  # First-party packages (@equationalapplications/*) are deliberately absent
+  # from this config: we control those releases, bump them on our own
+  # schedule, and they are exempt from the 14-day gate (the CI release-age
+  # check exempts them too).
   - package-ecosystem: npm
     directory: /
     schedule:
