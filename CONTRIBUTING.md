@@ -2,6 +2,13 @@
 
 Thanks for helping improve `@equationalapplications/expo-two-way-audio`.
 
+## Before you start
+
+- [INTENT.md](./INTENT.md) says what this package is and the rules it keeps. Read it first; if
+  something in the code contradicts it, the code is the bug.
+- [docs/ROADMAP.md](./docs/ROADMAP.md) says what gets built in what order and what each step
+  waits on. If you want to work on a step, comment on the matching issue so we don't double up.
+
 ## Reporting bugs and requesting features
 
 Open an issue at https://github.com/equationalapplications/expo-two-way-audio/issues. For bugs,
@@ -18,3 +25,14 @@ reproduction if you can.
 5. Use [Conventional Commits](https://www.conventionalcommits.org/) for commit messages.
 
 Formatting uses [Biome](https://biomejs.dev/): `npm run format:fix`.
+
+## Releases
+
+Maintainers release; contributors don't need to do anything here, and please don't push tags.
+
+1. A pull request bumps `version` in `package.json` and adds a `## <version> (<date>)` section
+   to `CHANGELOG.md`. Conventional Commit messages make that section easy to write.
+2. After it merges, a maintainer pushes a signed tag `v<version>` that matches `package.json`.
+3. The publish workflow typechecks, publishes to npm through trusted publishing with provenance
+   (no npm token is stored in this repo), and creates the GitHub release from the CHANGELOG
+   section. Nothing is published by hand.
