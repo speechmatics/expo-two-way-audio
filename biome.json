@@ -11,10 +11,7 @@
       "ios",
       "android",
       "expo-env.d.ts",
-      "./examples/*/node_modules",
-      "./examples/*/.expo",
-      "./examples/*/ios",
-      "./examples/*/android"
+      "package-lock.json"
     ]
   },
   "formatter": {
@@ -24,5 +21,12 @@
   },
   "linter": {
     "enabled": false
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "semicolons": "asNeeded",
+      "trailingCommas": "all"
+    }
   }
 }

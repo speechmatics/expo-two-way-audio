@@ -1,3 +1,5 @@
+package expo.modules.twowayaudio
+
 import android.annotation.SuppressLint
 import android.content.Context
 import android.media.AudioAttributes
@@ -35,10 +37,13 @@ class AudioEngine (context: Context) {
     private val executorServiceMicrophone = Executors.newFixedThreadPool(1)
     private val executorServicePlayback = Executors.newFixedThreadPool(1)
     private var speakerDevice: AudioDeviceInfo? = null
+    private var audioDeviceCallback: android.media.AudioDeviceCallback? = null
 
     var isRecording = false
     private var isRecordingBeforePause = false
-    var isPlaying = false
+    @Volatile var isPlaying = false
+    @Volatile private var playbackGeneration = 0
+    @Volatile private var abortPlayback = false
 
     // Callbacks
     var onMicDataCallback: ((ByteArray) -> Unit)? = null
@@ -59,41 +64,68 @@ class AudioEngine (context: Context) {
         // Route audio to external device if connected, otherwise route to speaker
         updateAudioRouting()
 
-        // Listen for changes in audio routing
-        audioManager.registerAudioDeviceCallback(object:android.media.AudioDeviceCallback(){
-            override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
-                Log.d("AudioEngine", "onAudioDevicesAdded")
-                super.onAudioDevicesAdded(addedDevices)
-                updateAudioRouting()
-            }
-            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
-                Log.d("AudioEngine", "onAudioDevicesRemoved")
-                super.onAudioDevicesRemoved(removedDevices)
-                updateAudioRouting()
-            }
-        }, null)
+        // Everything below can throw (buffer-size query, AudioTrack build,
+        // device-callback registration). The engine gets discarded on any
+        // failure — so restore the system-audio state mutated above instead of
+        // leaving MODE_IN_COMMUNICATION + held audio focus behind.
+        var track: AudioTrack? = null
+        try {
+            val bufferSize = AudioTrack.getMinBufferSize(
+                SAMPLE_RATE,
+                AudioFormat.CHANNEL_OUT_MONO,
+                AUDIO_FORMAT
+            )
 
-        val bufferSize = AudioTrack.getMinBufferSize(
-            SAMPLE_RATE,
-            AudioFormat.CHANNEL_OUT_MONO,
-            AUDIO_FORMAT
-        )
+            // Build first, THEN play: if play() throws, `track` is already
+            // set and the catch block can release it.
+            val newTrack = AudioTrack(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build(),
+                AudioFormat.Builder()
+                    .setEncoding(AUDIO_FORMAT)
+                    .setSampleRate(SAMPLE_RATE)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .build(),
+                bufferSize,
+                AudioTrack.MODE_STREAM,
+                audioManager.generateAudioSessionId()
+            )
+            track = newTrack
+            newTrack.play()
+            audioTrack = newTrack
 
-        audioTrack = AudioTrack(
-            AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                .build(),
-            AudioFormat.Builder()
-                .setEncoding(AUDIO_FORMAT)
-                .setSampleRate(SAMPLE_RATE)
-                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                .build(),
-            bufferSize,
-            AudioTrack.MODE_STREAM,
-            audioManager.generateAudioSessionId()
-        ).apply {
-            play()
+            // Listen for changes in audio routing (stored so tearDown() can
+            // unregister — previously the callback accumulated per session and
+            // kept mutating system audio routing after the engine was gone).
+            // Registered AFTER the AudioTrack is built: if construction above
+            // throws, initialize() catches it and the engine is discarded — a
+            // callback registered before that point would leak with no owner.
+            audioDeviceCallback = object : android.media.AudioDeviceCallback() {
+                override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
+                    Log.d("AudioEngine", "onAudioDevicesAdded")
+                    super.onAudioDevicesAdded(addedDevices)
+                    updateAudioRouting()
+                }
+                override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
+                    Log.d("AudioEngine", "onAudioDevicesRemoved")
+                    super.onAudioDevicesRemoved(removedDevices)
+                    updateAudioRouting()
+                }
+            }
+            audioManager.registerAudioDeviceCallback(audioDeviceCallback, null)
+        } catch (e: Exception) {
+            try {
+                track?.release()
+            } catch (releaseError: Exception) {
+                Log.e("AudioEngine", "Failed releasing AudioTrack during init failure", releaseError)
+            }
+            audioManager.mode = AudioManager.MODE_NORMAL
+            audioFocusRequest?.let { request ->
+                audioManager.abandonAudioFocusRequest(request)
+            }
+            throw e
         }
     }
 
@@ -140,6 +172,11 @@ class AudioEngine (context: Context) {
 
     @SuppressLint("NewApi")
     private fun requestAudioFocus() {
+        // Abandon any previous request first — resume used to leak one per
+        // background/foreground cycle.
+        audioFocusRequest?.let { request ->
+            audioManager.abandonAudioFocusRequest(request)
+        }
         val focusRequest =
             AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
                 .setAudioAttributes(
@@ -162,7 +199,10 @@ class AudioEngine (context: Context) {
         audioFocusRequest = focusRequest
         val result = audioManager.requestAudioFocus(focusRequest)
 
-        if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+        // DELAYED is a normal outcome given setAcceptsDelayedFocusGain(true);
+        // treating it as failure used to throw out of the Activity onResume
+        // path (resumeRecordingAndPlayer) and crash the app.
+        if (result == AudioManager.AUDIOFOCUS_REQUEST_FAILED) {
             throw RuntimeException("Audio focus request failed")
         }
     }
@@ -218,11 +258,15 @@ class AudioEngine (context: Context) {
                     }
                 }
                 Log.d("AudioEngine", "Mic sample tap stopped.")
-            }catch (e: Exception){
+            } catch (e: Exception) {
                 Log.e("AudioEngine", "Error reading mic sample data", e)
                 isRecording = false
                 tearDown()
-                throw e
+                // NO rethrow: this closure runs inside executorServiceMicrophone,
+                // so a throw here hits the thread's default uncaught-exception
+                // handler and KILLS THE APP. tearDown() is idempotent and marks
+                // the engine torn-down; the module drops a torn-down engine and
+                // the next initialize() builds a fresh one.
             }
         }
     }
@@ -234,6 +278,14 @@ class AudioEngine (context: Context) {
             audioRecord.stop()
             audioRecord.release()
         }
+        // Release the audio effects (created per startRecording) — previously
+        // leaked on every mic toggle.
+        echoCanceler?.enabled = false
+        echoCanceler?.release()
+        echoCanceler = null
+        noiseSuppressor?.enabled = false
+        noiseSuppressor?.release()
+        noiseSuppressor = null
         onInputVolumeCallback?.invoke(0.0F)
     }
 
@@ -252,31 +304,71 @@ class AudioEngine (context: Context) {
     }
 
     fun playPCMData(data: ByteArray) {
-        audioSampleQueue.add(data)
-        if (!isPlaying) {
-            playAudioFromSampleQueue()
+        // The start decision and the isPlaying claim are made under the queue
+        // lock so exactly one playback loop is ever started for a non-empty
+        // queue (see the invariant in playAudioFromSampleQueue).
+        val generation: Int
+        val startPlayback: Boolean
+        synchronized(audioSampleQueue) {
+            audioSampleQueue.add(data)
+            generation = playbackGeneration
+            startPlayback = !isPlaying
+            if (startPlayback) isPlaying = true
+        }
+        if (startPlayback) {
+            playAudioFromSampleQueue(generation)
         }
     }
 
-    private fun playAudioFromSampleQueue() {
-        executorServicePlayback.execute{
-            isPlaying = true
-            try {
-                while (audioSampleQueue.isNotEmpty()){
-                    val data = audioSampleQueue.poll()
-                    if (data != null){
-                        playSample(data)
-                        val audioVolume = calculateRMSLevel(data)
-                        onOutputVolumeCallback?.invoke(audioVolume)
-                    }else{
-                        break
-                    }
+    private fun playAudioFromSampleQueue(generation: Int = playbackGeneration) {
+        executorServicePlayback.execute {
+            // Early return: isPlaying may stay true here with a non-empty
+            // queue. This is safe ONLY because every generation bump pairs
+            // with a barge-in task queued behind this one (which restarts the
+            // drain, see the tail of clearPlaybackQueueForBargeIn) — except
+            // tearDown, which shuts this executor down. Do not bump the
+            // generation anywhere else without preserving one of the two.
+            if (generation != playbackGeneration || abortPlayback) {
+                synchronized(audioSampleQueue) {
+                    if (audioSampleQueue.isEmpty()) isPlaying = false
                 }
-            }catch (e: Exception){
+                return@execute
+            }
+            // isPlaying was already claimed under the queue lock by whichever
+            // path started this loop (playPCMData, the barge-in restart, or
+            // the drain re-kick) — do not set it here unlocked.
+            try {
+                while (!abortPlayback && generation == playbackGeneration) {
+                    val data: ByteArray?
+                    synchronized(audioSampleQueue) {
+                        data = audioSampleQueue.poll()
+                        // Invariant: loop termination is decided atomically
+                        // with the empty check, so a chunk enqueued after this
+                        // poll() is either consumed by this loop or, seeing
+                        // isPlaying == false under the same lock, starts a new
+                        // one. No chunk can be stranded between polls.
+                        if (data == null) isPlaying = false
+                    }
+                    if (data == null) break
+                    if (abortPlayback || generation != playbackGeneration) break
+                    playSample(data)
+                    val audioVolume = calculateRMSLevel(data)
+                    onOutputVolumeCallback?.invoke(audioVolume)
+                }
+            } catch (e: Exception) {
                 Log.e("AudioEngine", "Error playing audio", e)
                 e.printStackTrace()
-            }finally {
-                isPlaying = false
+            } finally {
+                synchronized(audioSampleQueue) {
+                    if (audioSampleQueue.isEmpty() ||
+                        generation != playbackGeneration || abortPlayback) {
+                        isPlaying = false
+                    } else {
+                        // Chunks arrived for the current generation while this
+                        // loop was exiting: keep draining them.
+                        playAudioFromSampleQueue(generation)
+                    }
+                }
                 onOutputVolumeCallback?.invoke(0.0F)
             }
         }
@@ -305,15 +397,91 @@ class AudioEngine (context: Context) {
 
     @RequiresApi(Build.VERSION_CODES.Q)
     fun resumeRecordingAndPlayer() {
-        requestAudioFocus()
-        isRecording = toggleRecording(isRecordingBeforePause)
-        audioTrack.play()
+        // Reachable from the host Activity's onResume path (via
+        // ExpoTwoWayAudioLifeCycleListener) — nothing here may crash the app,
+        // so every failure degrades to a log.
+        try {
+            requestAudioFocus()
+        } catch (e: Exception) {
+            Log.e("AudioEngine", "Audio focus request failed on resume", e)
+        }
+        try {
+            isRecording = toggleRecording(isRecordingBeforePause)
+            audioTrack.play()
+        } catch (e: Exception) {
+            Log.e("AudioEngine", "Audio resume failed", e)
+        }
     }
+
+    /** Stop scheduled agent audio immediately while keeping the mic alive (barge-in). */
+    fun clearPlaybackQueueForBargeIn() {
+        abortPlayback = true
+        synchronized(audioSampleQueue) {
+            playbackGeneration += 1
+            audioSampleQueue.clear()
+        }
+        // All AudioTrack mutations must run on the playback executor so we never
+        // pause/flush while another task on that thread is mid-write().
+        executorServicePlayback.execute {
+            try {
+                audioTrack.pause()
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    audioTrack.flush()
+                }
+                audioTrack.play()
+            } catch (e: Exception) {
+                Log.e("AudioEngine", "Error clearing playback queue", e)
+            }
+            abortPlayback = false
+            onOutputVolumeCallback?.invoke(0.0F)
+            // Decide restart-vs-idle under the same lock playPCMData uses for
+            // its start decision, so a concurrent enqueue can never start a
+            // duplicate loop (isPlaying has a single lock-guarded writer path).
+            val restartPlayback: Boolean
+            synchronized(audioSampleQueue) {
+                if (audioSampleQueue.isNotEmpty()) {
+                    isPlaying = true
+                    restartPlayback = true
+                } else {
+                    isPlaying = false
+                    restartPlayback = false
+                }
+            }
+            if (restartPlayback) {
+                playAudioFromSampleQueue()
+            }
+        }
+    }
+
+    /** True once tearDown() has run; a torn-down engine is dead and must be discarded. */
+    @Volatile
+    var isTornDown: Boolean = false
+        private set
 
     @SuppressLint("NewApi")
     fun tearDown() {
+        // Idempotent: a double tearDown (mic-tap failure path + module OnDestroy,
+        // or two JS tearDown calls) must not pause/stop/release an already
+        // released AudioTrack — the IllegalStateException used to escape
+        // Function("tearDown") and leave the module stuck with a dead engine.
+        if (isTornDown) return
+        isTornDown = true
+        // Abort any running playback loop and drop queued agent audio BEFORE
+        // releasing native resources — otherwise the old loop keeps draining
+        // queued audio and firing volume callbacks after the engine reference
+        // is gone (same abort+clear+bump shape as clearPlaybackQueueForBargeIn).
+        abortPlayback = true
+        synchronized(audioSampleQueue) {
+            playbackGeneration += 1
+            audioSampleQueue.clear()
+        }
         stopRecording()
+        audioTrack.pause()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            audioTrack.flush()
+        }
         audioTrack.stop()
+        audioTrack.release()
         audioManager.mode = AudioManager.MODE_NORMAL
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             audioManager.clearCommunicationDevice()
@@ -322,6 +490,11 @@ class AudioEngine (context: Context) {
             audioManager.abandonAudioFocusRequest(request)
         }
         executorServiceMicrophone.shutdownNow()
+        executorServicePlayback.shutdownNow()
+        audioDeviceCallback?.let { callback ->
+            audioManager.unregisterAudioDeviceCallback(callback)
+        }
+        audioDeviceCallback = null
     }
 
 

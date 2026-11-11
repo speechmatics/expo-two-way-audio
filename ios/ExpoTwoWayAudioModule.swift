@@ -96,14 +96,11 @@ public class ExpoTwoWayAudioModule: Module {
             self.audioEngine = nil
         }
 
-        Function("restart") {
-            self.audioEngine?.resumeRecordingAndPlayer()
-            self.sendEvent(
-                ON_RECORDING_CHANGE_EVENT_NAME,
-                [
-                    "data": audioEngine?.isRecording
-                ])
-
+        // Barge-in: flush playback immediately, keep the mic/engine alive.
+        // (Replaces upstream's forked `restart`; emits no events — recording
+        // state does not change and the app only subscribes onMicrophoneData.)
+        Function("bargeIn") {
+            self.audioEngine?.clearPlaybackQueueForBargeIn()
         }
 
         Function("playPCMData") { (pcmData: Data) in
@@ -122,7 +119,7 @@ public class ExpoTwoWayAudioModule: Module {
             EXPermissionsMethodsDelegate.getPermissionWithPermissionsManager(
                 self.appContext?.permissions,
                 withRequester: MicrophonePermissionRequester.self,
-                resolve: promise.resolver,
+                resolve: promise.legacyResolver,
                 reject: promise.legacyRejecter
             )
         }
@@ -131,9 +128,17 @@ public class ExpoTwoWayAudioModule: Module {
             EXPermissionsMethodsDelegate.askForPermission(
                 withPermissionsManager: self.appContext?.permissions,
                 withRequester: MicrophonePermissionRequester.self,
-                resolve: promise.resolver,
+                resolve: promise.legacyResolver,
                 reject: promise.legacyRejecter
             )
+        }
+
+        // JS reload (dev or OTA) destroys this module instance; tear the engine
+        // down with it so the session and engine taps don't outlive their
+        // owner. The next initialize() builds a fresh engine.
+        OnDestroy {
+            self.audioEngine?.tearDown()
+            self.audioEngine = nil
         }
 
         // Define the events that can be emitted

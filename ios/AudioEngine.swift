@@ -10,6 +10,11 @@ class AudioEngine {
     
     public private(set) var voiceIOFormat: AVAudioFormat
     public private(set) var isRecording = false
+    // Mic state when the current interruption began (restored on .ended).
+    private var wasRecordingBeforeInterruption = false
+    // True between interruption .began and .ended — while set, JS-facing
+    // toggles record intent rather than immediate state.
+    private var isInterrupted = false
     
     public var onMicDataCallback: ((Data) -> Void)?
     public var onInputVolumeCallback: ((Float) -> Void)?
@@ -107,15 +112,22 @@ class AudioEngine {
             print("Could not enable voice processing \(error)")
             return
         }
-        
+
         avAudioEngine.inputNode.isVoiceProcessingInputMuted = !isRecording
-        
+
         let output = avAudioEngine.outputNode
         let mainMixer = avAudioEngine.mainMixerNode
-        
+
         avAudioEngine.connect(speechPlayer, to: mainMixer, format: voiceIOFormat)
         avAudioEngine.connect(mainMixer, to: output, format: voiceIOFormat)
-        
+
+        // setup() can run more than once (media-services reset re-runs it) —
+        // remove any existing taps first or installTap raises an ObjC
+        // exception for a second tap on the same bus. removeTap is a no-op
+        // when no tap is installed.
+        input.removeTap(onBus: 0)
+        mainMixer.removeTap(onBus: 0)
+
         input.installTap(onBus: 0, bufferSize: 2048, format: voiceIOFormat) { [weak self] buffer, when in
             // We don't do any input processing (no volume calculation or passing mic data to the callback) if discardRecording == true
             // See comment in the playPCMData function
@@ -239,7 +251,20 @@ class AudioEngine {
         input.isVoiceProcessingBypassed = bypass
     }
     
+    /// JS-facing toggle. While an interruption is in flight the engine is
+    /// force-stopped, so this expresses USER INTENT, not immediate state:
+    /// record it as the post-interruption restore target instead of letting
+    /// `.ended` revive a mic the user just muted.
     func toggleRecording(_ val: Bool) -> Bool {
+        if isInterrupted {
+            wasRecordingBeforeInterruption = val
+        }
+        return setRecording(val)
+    }
+
+    /// Engine-internal recording state change — never touches the
+    /// interruption intent snapshot.
+    private func setRecording(_ val: Bool) -> Bool {
         isRecording = val
         if !isRecording {
             avAudioEngine.inputNode.isVoiceProcessingInputMuted = true
@@ -260,20 +285,28 @@ class AudioEngine {
         } catch {
             print("Could not set the audio session to inactive: \(error)")
         }
-        toggleRecording(false)
+        setRecording(false)
         speechPlayer.stop()
         updateOutputVolume()
     }
     
-    func resumeRecordingAndPlayer(){
+    func resumeRecordingAndPlayer(restoreRecording: Bool = true){
         do {
             try AVAudioSession.sharedInstance().setActive(true)
         } catch {
             print("Could not set the audio session to active: \(error)")
         }
         self.checkEngineIsRunning()
-        isRecording = toggleRecording(true)
+        isRecording = setRecording(restoreRecording)
         speechPlayer.play()
+    }
+    
+    /// Stop scheduled agent audio immediately while keeping the mic/engine alive (barge-in).
+    func clearPlaybackQueueForBargeIn() {
+        speechPlayer.stop()
+        speechPlayer.reset()
+        updateOutputVolume()
+        checkEngineIsRunning()
     }
     
     func tearDown() {
@@ -298,26 +331,51 @@ class AudioEngine {
 
         switch type {
         case .began:
+            // Remember whether the mic was live so `.ended` restores exactly
+            // that state — previously any `shouldResume` interruption turned
+            // the mic back on even if the user had muted it.
+            self.wasRecordingBeforeInterruption = self.isRecording
+            self.isInterrupted = true
             self.stopRecordingAndPlayer()
             onAudioInterruptionCallback?("began")
         case .ended:
+            // The interruption is over: JS toggles are live state again.
+            // Reset UNCONDITIONALLY — `.ended` may legitimately arrive without
+            // the options key, and leaving isInterrupted stuck true would make
+            // every later JS toggle overwrite wasRecordingBeforeInterruption
+            // that nothing ever reads.
+            self.isInterrupted = false
             if let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
                 let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
                 if options.contains(.shouldResume) {
-                    // Interruption ended. Resume playback.
-                    self.resumeRecordingAndPlayer()
+                    // Interruption ended. Resume playback; restore the mic
+                    // only if it was live when the interruption began (or if
+                    // the user re-enabled it during the interruption).
+                    self.resumeRecordingAndPlayer(restoreRecording: self.wasRecordingBeforeInterruption)
                     onAudioInterruptionCallback?("ended")
                 } else {
                     // Interruption ends. Don't resume playback.
                     onAudioInterruptionCallback?("blocked")
                 }
+            } else {
+                // No options key: be conservative — report blocked, no resume.
+                onAudioInterruptionCallback?("blocked")
             }
         @unknown default:
-            fatalError("Unknown type: \(type)")
+            // Don't crash on future SDK interruption types — log and carry on.
+            print("AudioEngine: unknown interruption type \(type.rawValue)")
         }
     }
     
     private func handleMediaServicesWereReset() {
+        // The media server daemon rebuilt the audio graph: refresh the
+        // session category first, then rebuild — and setup() now removes
+        // existing taps before reinstalling, so this can't double-tap.
+        // NOTE: we deliberately reuse the existing avAudioEngine/speechPlayer
+        // objects (matches long-standing behavior); if a device ever shows a
+        // post-reset fault, recreating them is the next step per Apple's
+        // guidance.
+        self.setupAudioSession()
         self.avAudioEngine.stop()
         self.setup()
         self.start()
