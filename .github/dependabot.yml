@@ -1,0 +1,39 @@
+# Dependency and workflow-update automation.
+#
+# The 14-day cooldown mirrors the house 14-day dependency-age gate: a
+# dependency-bump PR whose target version was released upstream less than
+# 14 days ago must not merge, and such PRs carry the `cooldown-blocked`
+# label until the version matures (label removed once the gate clears).
+# Dependabot's cooldown keeps most of those PRs from ever opening; it is
+# policy alignment, not enforcement — a human reviewing a dependency PR
+# still applies the gate by checking the version's release date in the
+# registry (see CONTRIBUTING.md, "Dependency updates"). First-party
+# `@equationalapplications/*` releases are exempt from the gate.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    groups:
+      # One PR per cycle for all update types, so major bumps do not arrive
+      # as one PR per dependency.
+      npm-all:
+        update-types:
+          - major
+          - minor
+          - patch
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    groups:
+      actions-all:
+        update-types:
+          - major
+          - minor
+          - patch
