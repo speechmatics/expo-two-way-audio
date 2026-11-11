@@ -47,9 +47,7 @@
   },
   "homepage": "https://github.com/equationalapplications/expo-two-way-audio#readme",
   "author": "Equational Applications (https://github.com/equationalapplications)",
-  "contributors": [
-    "Speechmatics <devrel@speechmatics.com> (https://github.com/speechmatics)"
-  ],
+  "contributors": ["Speechmatics <devrel@speechmatics.com> (https://github.com/speechmatics)"],
   "license": "MIT",
   "publishConfig": {
     "access": "public",
