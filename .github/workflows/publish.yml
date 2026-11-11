@@ -1,0 +1,42 @@
+name: Publish to npm
+# Push a tag v<version> matching package.json to publish. Uses npm trusted
+# publishing (OIDC): no npm token is stored in this repo.
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://registry.npmjs.org
+      - name: Tag must match package.json version
+        run: |
+          v="$(node -p 'require("./package.json").version')"
+          [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME != v$v"; exit 1; }
+      - name: Skip if this version is already on npm
+        id: exists
+        run: |
+          name="$(node -p 'require("./package.json").name')"
+          v="$(node -p 'require("./package.json").version')"
+          if npm view "$name@$v" version >/dev/null 2>&1; then
+            echo "$name@$v is already published; nothing to do."
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.exists.outputs.published != 'true'
+        run: npm ci
+      - if: steps.exists.outputs.published != 'true'
+        run: npm run typecheck
+      - if: steps.exists.outputs.published != 'true'
+        run: npm publish

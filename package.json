@@ -1,40 +1,65 @@
 {
-  "name": "@speechmatics/expo-two-way-audio",
-  "version": "0.1.2",
-  "description": "Native module for two way audio streaming",
+  "name": "@equationalapplications/expo-two-way-audio",
+  "version": "0.2.0",
+  "description": "Expo module for real-time two-way PCM audio: echo-cancelled mic capture, low-latency playback, and barge-in. Maintained fork of @speechmatics/expo-two-way-audio.",
   "main": "build/index.js",
   "types": "build/index.d.ts",
+  "files": [
+    "build",
+    "src",
+    "android/build.gradle",
+    "android/src/main",
+    "ios",
+    "expo-module.config.json",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
   "scripts": {
-    "build": "expo-module build",
-    "clean": "expo-module clean",
-    "lint": "expo-module lint",
-    "test": "expo-module test",
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "format": "biome check .",
     "format:fix": "biome check --write .",
-    "typecheck": "tsc",
-    "prepare": "expo-module prepare",
-    "prepublishOnly": "expo-module prepublishOnly",
-    "expo-module": "expo-module",
-    "open:ios": "xed examples/basic-usage/ios",
-    "open:android": "open -a \"Android Studio\" examples/basic-usage/android"
+    "prepack": "npm run clean && npm run build"
   },
-  "keywords": ["react-native", "expo", "expo-two-way-audio", "ExpoTwoWayAudio"],
-  "repository": "https://github.com/speechmatics/expo-two-way-audio",
+  "keywords": [
+    "react-native",
+    "expo",
+    "expo-module",
+    "audio",
+    "pcm",
+    "voice",
+    "echo-cancellation",
+    "barge-in",
+    "two-way-audio"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/equationalapplications/expo-two-way-audio.git"
+  },
   "bugs": {
-    "url": "https://github.com/speechmatics/expo-two-way-audio/issues"
+    "url": "https://github.com/equationalapplications/expo-two-way-audio/issues"
   },
-  "author": "Speechmatics <devrel@speechmatics.com> (https://github.com/speechmatics)",
+  "homepage": "https://github.com/equationalapplications/expo-two-way-audio#readme",
+  "author": "Equational Applications (https://github.com/equationalapplications)",
+  "contributors": ["Speechmatics <devrel@speechmatics.com> (https://github.com/speechmatics)"],
   "license": "MIT",
-  "homepage": "https://github.com/speechmatics/expo-two-way-audio#readme",
-  "devDependencies": {
-    "@biomejs/biome": "1.9.4",
-    "@types/react": "^18.0.25",
-    "expo-module-scripts": "^3.5.2",
-    "expo-modules-core": "^2.0.4"
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "peerDependencies": {
-    "expo": "*",
+    "expo": ">=55.0.0",
     "react": "*",
     "react-native": "*"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.9.4",
+    "@types/react": "19.3.0",
+    "expo": "58.0.21",
+    "react": "19.3.0",
+    "react-native": "0.88.1",
+    "typescript": "6.0.3"
   }
 }
