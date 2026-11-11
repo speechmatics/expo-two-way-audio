@@ -16,6 +16,27 @@ This is a maintained fork of
 been inactive since January 2025. It adds barge-in, builds on Expo SDK 55+, and fixes a number of
 threading, teardown and interruption bugs. See [CHANGELOG.md](./CHANGELOG.md).
 
+## Coming from `@speechmatics/expo-two-way-audio`?
+
+This package replaces it with one API change. It needs Expo SDK 55 or newer.
+
+1. Swap the package:
+
+   ```sh
+   npm uninstall @speechmatics/expo-two-way-audio
+   npx expo install @equationalapplications/expo-two-way-audio
+   ```
+
+2. Change imports from `@speechmatics/expo-two-way-audio` to
+   `@equationalapplications/expo-two-way-audio`.
+3. If you called `restart()` to interrupt playback, call `bargeIn()` instead. It stops queued audio
+   immediately and keeps the microphone running.
+4. Rebuild the native app (`npx expo prebuild --clean`, or a new EAS build).
+
+What you get: iOS builds on Expo SDK 55+ (the `EXFatal` and `promise.resolver` compile errors are
+fixed), no iOS crash from a duplicate audio tap after a media-services reset, and thread-safe
+Android playback. See [CHANGELOG.md](./CHANGELOG.md) for the full list.
+
 ## Installation
 
 ```sh
@@ -112,12 +133,6 @@ export function useVoice() {
 | `onOutputVolumeLevelData` | `number`: playback level, 0–1 |
 | `onRecordingChange` | `boolean`: recording on or off |
 | `onAudioInterruption` | `string`: `"began"`, `"ended"` or `"blocked"` (iOS); `"blocked"` (Android) |
-
-## Migrating from `@speechmatics/expo-two-way-audio`
-
-1. Replace the package and update imports to `@equationalapplications/expo-two-way-audio`.
-2. If you called `restart()` to interrupt playback, call `bargeIn()` instead.
-3. Rebuild the native app.
 
 ## Notes
 
