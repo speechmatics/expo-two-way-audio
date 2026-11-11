@@ -32,7 +32,11 @@
     "voice",
     "echo-cancellation",
     "barge-in",
-    "two-way-audio"
+    "two-way-audio",
+    "realtime",
+    "full-duplex",
+    "voice-agent",
+    "speech"
   ],
   "repository": {
     "type": "git",
@@ -43,7 +47,9 @@
   },
   "homepage": "https://github.com/equationalapplications/expo-two-way-audio#readme",
   "author": "Equational Applications (https://github.com/equationalapplications)",
-  "contributors": ["Speechmatics <devrel@speechmatics.com> (https://github.com/speechmatics)"],
+  "contributors": [
+    "Speechmatics <devrel@speechmatics.com> (https://github.com/speechmatics)"
+  ],
   "license": "MIT",
   "publishConfig": {
     "access": "public",
