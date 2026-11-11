@@ -1,5 +1,10 @@
 # @equationalapplications/expo-two-way-audio
 
+[![GitHub Tag](https://img.shields.io/github/v/tag/equationalapplications/expo-two-way-audio?label=github%20tag)](https://github.com/equationalapplications/expo-two-way-audio/tags)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+[![npm version](https://img.shields.io/npm/v/%40equationalapplications%2Fexpo-two-way-audio?label=%40equationalapplications%2Fexpo-two-way-audio)](https://www.npmjs.com/package/@equationalapplications/expo-two-way-audio)
+[![npm downloads](https://img.shields.io/npm/dm/%40equationalapplications%2Fexpo-two-way-audio?label=downloads)](https://www.npmjs.com/package/@equationalapplications/expo-two-way-audio)
+
 Expo module for real-time, two-way PCM audio on iOS and Android, built for voice conversation
 apps:
 
@@ -151,3 +156,7 @@ functions are not implemented there.
 
 MIT. Originally created by Speechmatics (Cantab Research Ltd); maintained by Equational
 Applications.
+
+---
+
+Made with ❤️ by Equational Applications LLC. [https://equationalapplications.com/](https://equationalapplications.com/)
