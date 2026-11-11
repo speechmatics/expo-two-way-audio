@@ -25,6 +25,18 @@ jobs:
         run: |
           v="$(node -p 'require("./package.json").version')"
           [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME != v$v"; exit 1; }
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm publish
+      - name: Skip if this version is already on npm
+        id: exists
+        run: |
+          name="$(node -p 'require("./package.json").name')"
+          v="$(node -p 'require("./package.json").version')"
+          if npm view "$name@$v" version >/dev/null 2>&1; then
+            echo "$name@$v is already published; nothing to do."
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.exists.outputs.published != 'true'
+        run: npm ci
+      - if: steps.exists.outputs.published != 'true'
+        run: npm run typecheck
+      - if: steps.exists.outputs.published != 'true'
+        run: npm publish
