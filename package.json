@@ -1,6 +1,6 @@
 {
   "name": "@equationalapplications/expo-two-way-audio",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Expo module for real-time two-way PCM audio: echo-cancelled mic capture, low-latency playback, and barge-in. Maintained fork of @speechmatics/expo-two-way-audio.",
   "main": "build/index.js",
   "types": "build/index.d.ts",

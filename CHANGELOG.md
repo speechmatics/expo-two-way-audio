@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 (2026-11-11)
+
+### Docs
+
+- README: migration guide from `@speechmatics/expo-two-way-audio` moved to the top.
+
 ## 0.2.0 (2026-11-11)
 
 First release as `@equationalapplications/expo-two-way-audio`, a maintained fork of
