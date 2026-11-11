@@ -29,15 +29,19 @@ Formatting uses [Biome](https://biomejs.dev/): `npm run format:fix`.
 ## Dependency updates
 
 Dependabot opens dependency and workflow-action updates weekly, grouped into one PR per
-ecosystem per cycle. Its 14-day cooldown (`.github/dependabot.yml`) keeps most too-new
-versions out of those PRs, but it is policy alignment, not enforcement.
+ecosystem per cycle. First-party `@equationalapplications/*` packages are deliberately not
+in its config: we control those releases and bump them on our own schedule, with no
+cooldown. Dependabot's 14-day cooldown (`.github/dependabot.yml`) keeps most too-new
+versions out of the other PRs, but it is policy alignment, not enforcement.
 
-Before approving any PR that bumps a dependency, check the target version's release date in
-the registry (npm: the `time` field, `npm view <pkg>@<version> time.modified`). If the
-version was released less than 14 days ago, **do not merge**: apply the `cooldown-blocked`
-label and wait for the version to mature, then remove the label and merge. If the age
-can't be determined, treat it as blocked. First-party `@equationalapplications/*` releases
-are exempt from the gate.
+The enforced gate is CI: `scripts/check-release-age.mjs` (run by the Dependency release age
+workflow) age-checks every package version in a PR's `package-lock.json` delta against the
+registry and fails if any was published less than 14 days ago. First-party packages are
+exempt. Regardless of CI, before approving a dependency PR also check the target version's
+release date (`npm view <pkg>@<version> time.modified`), including transitive versions
+dragged in through the lockfile. If a version was released less than 14 days ago, **do not
+merge**: apply the `cooldown-blocked` label and wait for it to mature, then remove the
+label and merge. If the age can't be determined, treat it as blocked.
 
 ## Releases
 

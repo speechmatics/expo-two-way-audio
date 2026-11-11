@@ -1,0 +1,45 @@
+name: Dependency release age
+
+# Policy: a PR's package-lock.json delta vs the base branch must contain no
+# registry version published in the last 14 days, to limit exposure to
+# poisoned upstream releases. A PR whose delta is empty (no new or changed
+# packages) passes without a cooldown; whole-lockfile sweeps stay available
+# as manual `workflow_dispatch` audits. First-party
+# @equationalapplications/* packages are exempt (house policy: we control
+# those releases). Runs before any install, so a too-new package's install
+# scripts never execute in CI.
+on:
+  pull_request:
+    paths:
+      - package.json
+      - package-lock.json
+      - scripts/check-release-age.mjs
+      - .github/workflows/dependency-release-age.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Full history so the base branch ref is present for the delta
+          # diff; `git show` afterwards needs no credentials.
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - name: Check minimum release age
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            node scripts/check-release-age.mjs --days 14 --base "$BASE_REF"
+          else
+            node scripts/check-release-age.mjs --days 14
+          fi
